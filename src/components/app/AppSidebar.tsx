@@ -25,7 +25,7 @@ function PlanCard() {
           Start a 10 min free session or buy credits for full-length call sessions.
         </p>
         <Link
-          href="/app/upgrade"
+          href="/dashboard/upgrade"
           className="mt-3 block w-full rounded-lg bg-neutral-950 py-2 text-center text-[13px] font-semibold text-white transition hover:bg-neutral-800"
         >
           Upgrade
@@ -52,7 +52,7 @@ function PlanCard() {
         {plan.type === "lifetime" && <span>Forever</span>}
       </div>
       <Link
-        href="/app/upgrade"
+        href="/dashboard/upgrade"
         className="mt-3 block w-full rounded-lg bg-white py-1.5 text-center text-[12.5px] font-semibold text-neutral-950 transition hover:bg-neutral-100"
       >
         Manage Plan
@@ -63,7 +63,7 @@ function PlanCard() {
 
 const navTop = [
   {
-    href: "/app",
+    href: "/dashboard",
     label: "Home",
     icon: (
       <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -72,7 +72,7 @@ const navTop = [
     ),
   },
   {
-    href: "/app/sessions",
+    href: "/dashboard/sessions",
     label: "Call Sessions",
     icon: (
       <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -84,7 +84,7 @@ const navTop = [
 
 const navBottom = [
   {
-    href: "/app/resumes",
+    href: "/dashboard/resumes",
     label: "CVs / Resumes",
     icon: (
       <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -94,7 +94,7 @@ const navBottom = [
     ),
   },
   {
-    href: "/app/documents",
+    href: "/dashboard/documents",
     label: "Documents",
     icon: (
       <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -112,7 +112,7 @@ export default function AppSidebar() {
   const [menuOpen, setMenuOpen] = useState(false);
 
   const isActive = (href: string) =>
-    href === "/app" ? pathname === "/app" : pathname.startsWith(href);
+    href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href);
 
   function handleSignOut() {
     setMenuOpen(false);
@@ -122,7 +122,7 @@ export default function AppSidebar() {
   return (
     <aside className="flex h-screen w-[260px] shrink-0 flex-col border-r border-neutral-200 bg-white">
       <div className="flex h-16 items-center px-6">
-        <Link href="/app" className="flex items-center gap-2">
+        <Link href="/dashboard" className="flex items-center gap-2">
           <span className="text-xl">🦜</span>
           <span className="text-[16px] font-bold tracking-tight text-neutral-950">
             InterviewAI

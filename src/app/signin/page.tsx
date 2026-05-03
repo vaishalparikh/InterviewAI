@@ -40,7 +40,7 @@ function ReviewCard({ r }: { r: (typeof reviews)[number] }) {
 
 function SignInForm() {
   const params = useSearchParams();
-  const callbackUrl = params.get("callbackUrl") || "/app";
+  const callbackUrl = params.get("callbackUrl") || "/dashboard";
   const error = params.get("error");
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState<null | "google" | "email">(null);

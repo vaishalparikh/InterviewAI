@@ -14,7 +14,7 @@ export default function ChoosePlatformModal({ open, sessionId, onClose }: Props)
 
   function openInBrowser() {
     onClose();
-    if (sessionId) router.push(`/app/sessions/${sessionId}`);
+    if (sessionId) router.push(`/dashboard/sessions/${sessionId}`);
   }
 
   return (

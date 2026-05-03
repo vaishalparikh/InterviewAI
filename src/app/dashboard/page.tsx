@@ -101,7 +101,7 @@ export default function HomePage() {
                     )}
                     {s.cta === "Upload Resume" ? (
                       <Link
-                        href="/app/resumes"
+                        href="/dashboard/resumes"
                         className="relative block w-full rounded-xl border border-neutral-200 bg-white py-3 text-center text-[13.5px] font-semibold text-neutral-900 transition hover:bg-neutral-50"
                       >
                         {s.cta}
@@ -171,7 +171,7 @@ export default function HomePage() {
         open={createOpen}
         free={free}
         onClose={() => setCreateOpen(false)}
-        onCreated={() => router.push("/app/sessions")}
+        onCreated={() => router.push("/dashboard/sessions")}
       />
     </>
   );

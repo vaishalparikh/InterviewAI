@@ -138,7 +138,7 @@ export default function LiveSessionPage() {
     if (!id) return;
     setRunning(false);
     store.endSession(id, transcript.filter((t) => t.who === "interviewer").length);
-    router.push("/app/sessions");
+    router.push("/dashboard/sessions");
   }
 
   function handleAiHelp() {
@@ -156,7 +156,7 @@ export default function LiveSessionPage() {
       <div className="grid h-full place-items-center text-[14px] text-neutral-500">
         <div className="text-center">
           <p>Session not found.</p>
-          <Link href="/app/sessions" className="mt-3 inline-block rounded-lg bg-neutral-950 px-4 py-2 text-[13px] font-semibold text-white hover:bg-neutral-800">
+          <Link href="/dashboard/sessions" className="mt-3 inline-block rounded-lg bg-neutral-950 px-4 py-2 text-[13px] font-semibold text-white hover:bg-neutral-800">
             Back to sessions
           </Link>
         </div>
@@ -170,7 +170,7 @@ export default function LiveSessionPage() {
       <header className="flex h-16 shrink-0 items-center justify-between border-b border-neutral-200 bg-white px-8">
         <div className="flex items-center gap-3">
           <Link
-            href="/app/sessions"
+            href="/dashboard/sessions"
             className="grid h-8 w-8 place-items-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
           >
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

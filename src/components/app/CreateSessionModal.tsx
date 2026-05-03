@@ -293,7 +293,7 @@ function FormStep({
           ) : (
             <div className="flex items-center justify-between rounded-lg border border-dashed border-neutral-300 bg-neutral-50/60 px-3 py-2 text-[12.5px] text-neutral-500">
               <span>No resume uploaded</span>
-              <a href="/app/resumes" className="font-semibold text-neutral-900 underline-offset-2 hover:underline">Upload</a>
+              <a href="/dashboard/resumes" className="font-semibold text-neutral-900 underline-offset-2 hover:underline">Upload</a>
             </div>
           )}
         </div>
@@ -333,7 +333,7 @@ function DocumentsStep({
         {documents.length === 0 ? (
           <div className="flex items-center justify-between rounded-lg border border-dashed border-neutral-300 bg-neutral-50/60 px-3 py-3 text-[12.5px]">
             <span className="text-neutral-500">No documents uploaded yet</span>
-            <a href="/app/documents" className="font-semibold text-neutral-900 underline-offset-2 hover:underline">Add document</a>
+            <a href="/dashboard/documents" className="font-semibold text-neutral-900 underline-offset-2 hover:underline">Add document</a>
           </div>
         ) : (
           <div className="max-h-48 space-y-2 overflow-y-auto">

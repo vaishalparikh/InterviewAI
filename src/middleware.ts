@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 
-const PROTECTED = /^\/app(\/.*)?$/;
+const PROTECTED = /^\/dashboard(\/.*)?$/;
 
 export default auth((req) => {
   const isProtected = PROTECTED.test(req.nextUrl.pathname);
@@ -12,10 +12,10 @@ export default auth((req) => {
   }
   // already signed in → bounce away from /signin
   if (req.nextUrl.pathname === "/signin" && req.auth) {
-    return NextResponse.redirect(new URL("/app", req.nextUrl.origin));
+    return NextResponse.redirect(new URL("/dashboard", req.nextUrl.origin));
   }
 });
 
 export const config = {
-  matcher: ["/app/:path*", "/signin"],
+  matcher: ["/dashboard/:path*", "/signin"],
 };

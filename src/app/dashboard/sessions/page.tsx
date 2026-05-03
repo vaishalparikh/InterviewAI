@@ -59,7 +59,7 @@ export default function SessionsPage() {
                 key={s.id}
                 className="grid grid-cols-[1.2fr_1.6fr_70px_1.2fr_0.6fr_1fr_140px] items-center gap-4 border-b border-neutral-100 py-4 text-[14px]"
               >
-                <Link href={`/app/sessions/${s.id}`} className="font-semibold text-neutral-950 hover:underline">
+                <Link href={`/dashboard/sessions/${s.id}`} className="font-semibold text-neutral-950 hover:underline">
                   {s.title}
                 </Link>
                 <div className="truncate text-neutral-700">{s.description}</div>
@@ -91,7 +91,7 @@ export default function SessionsPage() {
                 <div className="text-neutral-700">{s.createdAt}</div>
                 <div className="flex items-center gap-1.5">
                   <Link
-                    href={`/app/sessions/${s.id}`}
+                    href={`/dashboard/sessions/${s.id}`}
                     className="grid h-8 w-8 place-items-center rounded-md bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
                     title="View details"
                   >
