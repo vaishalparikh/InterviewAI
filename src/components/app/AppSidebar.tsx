@@ -225,18 +225,25 @@ export default function AppSidebar() {
         <div className="relative mt-3">
           <button
             onClick={() => setMenuOpen((v) => !v)}
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-neutral-500 transition hover:bg-neutral-50 hover:text-neutral-900"
+            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 transition hover:bg-neutral-50"
           >
             {user?.image ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={user.image} alt="" className="h-6 w-6 rounded-full" />
+              <img src={user.image} alt={user.name ?? ""} className="h-8 w-8 shrink-0 rounded-full ring-1 ring-neutral-200" referrerPolicy="no-referrer" />
             ) : (
-              <span className="grid h-6 w-6 place-items-center rounded-full bg-neutral-950 text-[10px] font-bold text-white">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-neutral-950 text-[12px] font-bold text-white">
                 {user?.name?.[0] ?? "U"}
               </span>
             )}
-            <span className="flex-1 truncate text-left">{user?.email ?? "—"}</span>
-            <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="currentColor">
+            <div className="min-w-0 flex-1 text-left">
+              <div className="truncate text-[12.5px] font-semibold text-neutral-900">
+                {user?.name ?? "User"}
+              </div>
+              <div className="truncate text-[11px] text-neutral-500">
+                {user?.email ?? "—"}
+              </div>
+            </div>
+            <svg viewBox="0 0 20 20" className="h-3.5 w-3.5 shrink-0 text-neutral-400" fill="currentColor">
               <path d="M5 8l5 5 5-5z" />
             </svg>
           </button>
