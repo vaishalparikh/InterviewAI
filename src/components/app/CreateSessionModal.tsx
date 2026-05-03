@@ -223,6 +223,37 @@ function FormStep({
   onClose: () => void;
   onNext: () => void;
 }) {
+  const [scraping, setScraping] = useState(false);
+  const [scrapeMsg, setScrapeMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  async function handleScrape() {
+    const url = draft.jobUrl.trim();
+    if (!url) return;
+    setScraping(true);
+    setScrapeMsg(null);
+    try {
+      const res = await fetch("/api/scrape-job", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setScrapeMsg({ kind: "err", text: data.error || "Couldn't read this page." });
+        return;
+      }
+      update({
+        company: data.company || draft.company,
+        description: data.description || draft.description,
+      });
+      setScrapeMsg({ kind: "ok", text: "Filled from the page — review and edit if needed." });
+    } catch {
+      setScrapeMsg({ kind: "err", text: "Network error. Please enter the details manually." });
+    } finally {
+      setScraping(false);
+    }
+  }
+
   return (
     <>
       <ModalHeader title={free ? "Free Session (10 min)" : "Start Session"} onClose={onClose} />
@@ -257,12 +288,51 @@ function FormStep({
           <>
             <div>
               <FieldLabel>Job Post URL <span className="text-[12px] font-normal text-neutral-500">(Optional)</span></FieldLabel>
-              <input
-                value={draft.jobUrl}
-                onChange={(e) => update({ jobUrl: e.target.value })}
-                placeholder="https://company.com/jobs/123"
-                className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13.5px] placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
-              />
+              <div className="flex gap-2">
+                <input
+                  value={draft.jobUrl}
+                  onChange={(e) => {
+                    update({ jobUrl: e.target.value });
+                    if (scrapeMsg) setScrapeMsg(null);
+                  }}
+                  placeholder="https://company.com/jobs/123"
+                  className="flex-1 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13.5px] placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleScrape}
+                  disabled={!draft.jobUrl.trim() || scraping}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-neutral-950 px-3.5 text-[13px] font-semibold text-white transition hover:bg-neutral-800 disabled:bg-neutral-300"
+                >
+                  {scraping ? (
+                    <>
+                      <svg viewBox="0 0 50 50" className="h-3.5 w-3.5 animate-spin" fill="none" stroke="currentColor" strokeWidth="5">
+                        <circle cx="25" cy="25" r="20" strokeOpacity="0.3" />
+                        <path d="M45 25a20 20 0 0 0-20-20" strokeLinecap="round" />
+                      </svg>
+                      Scraping
+                    </>
+                  ) : (
+                    <>
+                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 21l-4.35-4.35" />
+                        <circle cx="11" cy="11" r="7" />
+                      </svg>
+                      Scrape &amp; Fill
+                    </>
+                  )}
+                </button>
+              </div>
+              {scrapeMsg && (
+                <p
+                  className={`mt-1.5 text-[12px] ${
+                    scrapeMsg.kind === "ok" ? "text-emerald-600" : "text-rose-600"
+                  }`}
+                >
+                  {scrapeMsg.kind === "ok" ? "✓ " : "⚠ "}
+                  {scrapeMsg.text}
+                </p>
+              )}
             </div>
 
             <div className="text-center text-[12px] text-neutral-400">— or input manually —</div>
