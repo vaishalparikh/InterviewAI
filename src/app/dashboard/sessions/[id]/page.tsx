@@ -57,6 +57,7 @@ export default function LiveSessionPage() {
   const [live, setLive] = useState(false);
   const [hasScreenAudio, setHasScreenAudio] = useState(false);
   const [hasMic, setHasMic] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
   const [interim, setInterim] = useState<string>("");
   const [audioLevel, setAudioLevel] = useState(0);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -355,10 +356,51 @@ export default function LiveSessionPage() {
     setLive(false);
     setHasScreenAudio(false);
     setHasMic(false);
+    setMicMuted(false);
     setInterim("");
     setAudioLevel(0);
     if (!unmounting && id) {
       // session metadata stays "active" until Exit
+    }
+  }
+
+  function toggleMicMute() {
+    if (!micRef.current) return;
+    const next = !micMuted;
+    setMicMuted(next);
+
+    // Toggle the actual MediaStream track so even raw audio path mutes
+    micRef.current.getAudioTracks().forEach((t) => {
+      t.enabled = !next;
+    });
+
+    if (next) {
+      // muting: stop speech recognition + clear interim
+      recognitionShouldRun.current = false;
+      try {
+        recognitionRef.current?.stop();
+      } catch {
+        /* ignored */
+      }
+      setInterim("");
+      setAudioLevel(0);
+      toast.info({
+        title: "Mic muted",
+        message: "Your voice won't be transcribed until you unmute.",
+      });
+    } else {
+      // unmuting: restart speech recognition
+      recognitionShouldRun.current = true;
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.start();
+        } catch {
+          // already running
+        }
+      } else {
+        startSpeechRecognition();
+      }
+      toast.success({ title: "Mic unmuted", message: "Listening again." });
     }
   }
 
@@ -623,16 +665,49 @@ export default function LiveSessionPage() {
                 </svg>
               </button>
             ) : (
-              <button
-                onClick={() => handleStop()}
-                className="inline-flex items-center gap-2 rounded-lg bg-rose-500 px-3 py-1.5 text-[13px] font-semibold text-white transition hover:bg-rose-600"
-              >
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/60" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
-                </span>
-                Stop
-              </button>
+              <>
+                <button
+                  onClick={() => handleStop()}
+                  className="inline-flex items-center gap-2 rounded-lg bg-rose-500 px-3 py-1.5 text-[13px] font-semibold text-white transition hover:bg-rose-600"
+                >
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/60" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+                  </span>
+                  Stop
+                </button>
+                {hasMic && (
+                  <button
+                    onClick={toggleMicMute}
+                    title={micMuted ? "Unmute microphone" : "Mute microphone"}
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[13px] font-semibold transition ${
+                      micMuted
+                        ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                        : "border-neutral-200 bg-white text-neutral-900 hover:bg-neutral-50"
+                    }`}
+                  >
+                    {micMuted ? (
+                      <>
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 3l18 18" />
+                          <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 12V6a3 3 0 0 0-5.83-1" />
+                          <path d="M5 11a7 7 0 0 0 11.92 5M19 11a7 7 0 0 1-.13 1.36" />
+                          <path d="M12 18v3" />
+                        </svg>
+                        Unmute
+                      </>
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="9" y="3" width="6" height="11" rx="3" />
+                          <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+                        </svg>
+                        Mute
+                      </>
+                    )}
+                  </button>
+                )}
+              </>
             )}
             <button
               onClick={handleClearTranscript}
@@ -648,9 +723,17 @@ export default function LiveSessionPage() {
                 <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ${hasScreenAudio ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-amber-200"}`}>
                   🔊 {hasScreenAudio ? "Tab audio" : "No tab audio"}
                 </span>
-                <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 ring-1 ${hasMic ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-rose-50 text-rose-700 ring-rose-200"}`}>
-                  🎙 {hasMic ? "Mic" : "No mic"}
-                  {hasMic && (
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 ring-1 ${
+                    !hasMic
+                      ? "bg-rose-50 text-rose-700 ring-rose-200"
+                      : micMuted
+                        ? "bg-neutral-100 text-neutral-600 ring-neutral-200"
+                        : "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                  }`}
+                >
+                  {micMuted ? "🔇" : "🎙"} {!hasMic ? "No mic" : micMuted ? "Muted" : "Mic"}
+                  {hasMic && !micMuted && (
                     <span className="relative ml-0.5 inline-block h-2 w-10 overflow-hidden rounded-full bg-emerald-100">
                       <span
                         className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-[width] duration-75"
