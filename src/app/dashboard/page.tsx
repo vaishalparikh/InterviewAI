@@ -59,6 +59,52 @@ const titleFor = (eyebrow: string) =>
   eyebrow === "Step 1:" ? "Free Session" :
   eyebrow === "Step 2:" ? "Buy Credits" : "Real Interview";
 
+function Greeting({
+  name,
+  email,
+  image,
+}: {
+  name?: string | null;
+  email?: string | null;
+  image?: string | null;
+}) {
+  const hour = new Date().getHours();
+  const partOfDay =
+    hour < 5 ? "Hi" :
+    hour < 12 ? "Good morning" :
+    hour < 17 ? "Good afternoon" :
+    hour < 21 ? "Good evening" : "Working late";
+  const emoji = hour < 5 || hour >= 21 ? "🌙" : hour < 12 ? "☀️" : hour < 17 ? "👋🏻" : "🌅";
+
+  // First name from Google profile, fallback to email-username, fallback to "there"
+  const firstName =
+    name?.trim().split(/\s+/)[0] ??
+    email?.split("@")[0]?.replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) ??
+    "there";
+
+  return (
+    <div className="flex flex-col items-center gap-3 text-center">
+      {image && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={image}
+          alt={name ?? "Profile"}
+          className="h-14 w-14 rounded-full ring-2 ring-neutral-100"
+        />
+      )}
+      <h2 className="text-[28px] font-bold tracking-tight text-neutral-950">
+        {partOfDay}, {firstName} <span className="inline-block">{emoji}</span>
+      </h2>
+      {(name || email) && (
+        <p className="text-[13px] text-neutral-500">
+          Signed in as <span className="font-medium text-neutral-700">{name ?? email}</span>
+          {name && email && <span className="text-neutral-400"> · {email}</span>}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function HomePage() {
   const router = useRouter();
   const { data: session } = useSession();
@@ -81,9 +127,8 @@ export default function HomePage() {
 
       <main className="flex-1 overflow-y-auto px-8 py-10">
         <div className="mx-auto max-w-5xl">
-          <h2 className="text-center text-[28px] font-bold tracking-tight text-neutral-950">
-            Hi, {user?.name?.split(" ")[0] ?? "there"} <span className="inline-block">👋🏻</span>
-          </h2>
+          <Greeting name={user?.name} email={user?.email} image={user?.image} />
+
 
           <div className="mt-10 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] lg:gap-3">
             {steps.map((s, i) => (
