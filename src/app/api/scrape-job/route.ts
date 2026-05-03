@@ -171,6 +171,12 @@ function extractFromMarkdown(md: string, url: URL): ScrapeResult {
     content = content.slice(landmark);
   }
 
+  // 1.5) Truncate before footer-ish stops (Apply now / Equal opportunity / etc.)
+  const stop = findContentEnd(content);
+  if (stop > 200) {
+    content = content.slice(0, stop);
+  }
+
   // 2) Strip markdown formatting
   let plain = content
     .replace(/!\[.*?\]\(.*?\)/g, " ") // images
@@ -205,7 +211,7 @@ function extractFromMarkdown(md: string, url: URL): ScrapeResult {
     .replace(new RegExp(`\\s*[-|·–]\\s*${escapeRe(company)}.*$`, "i"), "")
     .trim();
 
-  const description = compose(cleanTitle, company, plain.slice(0, 1800));
+  const description = compose(cleanTitle, company, plain.slice(0, 2500));
 
   return {
     title: cleanTitle || undefined,
@@ -214,26 +220,90 @@ function extractFromMarkdown(md: string, url: URL): ScrapeResult {
   };
 }
 
-// Find where the actual job content starts on a page — common headings
+// Find where the actual job content starts on a page — common headings.
+// Searches in priority tiers — most JD-specific markers first; broad fallbacks last.
 function findContentLandmark(content: string): number {
-  const patterns: RegExp[] = [
-    /(?:^|\n)\s*#*\s*job description\b/i,
-    /(?:^|\n)\s*#*\s*about (?:the|this) (?:team|role|position|job|company)\b/i,
-    /(?:^|\n)\s*#*\s*role description\b/i,
-    /(?:^|\n)\s*#*\s*the role\b/i,
-    /(?:^|\n)\s*#*\s*role overview\b/i,
-    /(?:^|\n)\s*#*\s*position summary\b/i,
-    /(?:^|\n)\s*#*\s*job summary\b/i,
-    /(?:^|\n)\s*#*\s*key responsibilities\b/i,
-    /(?:^|\n)\s*#*\s*what (?:you|we)['']?(?:ll| will)? do\b/i,
-    /(?:^|\n)\s*#*\s*what you['']?(?:ll| will)? be doing\b/i,
-    /(?:^|\n)\s*#*\s*responsibilities\b/i,
-    /(?:^|\n)\s*#*\s*overview\b/i,
-    /(?:^|\n)\s*#*\s*about us\b/i,
+  // Match landmark phrase at the start of a line, allowing markdown wrappers
+  // (##, **, >, _, -) and any trailing punctuation/content.
+  const wrap = (phrase: string) =>
+    new RegExp(`(?:^|\\n)[\\s*#>_\\-]*${phrase}\\b`, "i");
+
+  // Tier 1 — explicit job-description headings. These almost always sit right above
+  // the actual JD body.
+  const tier1 = [
+    "job description",
+    "key job responsibilities",
+    "key responsibilities",
+    "main responsibilities",
+    "primary responsibilities",
+    "responsibilities and qualifications",
+    "what you['']?ll do",
+    "what you will do",
+    "what you['']?ll be doing",
+    "what you will be doing",
+    "what you['']?d be doing",
+    "your responsibilities",
+    "duties and responsibilities",
+    "role description",
+    "role overview",
+    "position description",
+    "position summary",
+    "position overview",
+    "job summary",
+    "job overview",
+    "job purpose",
+    "the opportunity",
   ];
 
+  // Tier 2 — context headings; usually sit just before the JD body.
+  const tier2 = [
+    "about (?:the|this) (?:team|role|position|job)",
+    "the role",
+    "responsibilities",
+    "what we['']?re looking for",
+    "your impact",
+    "your mission",
+  ];
+
+  // Tier 3 — generic catch-alls. Avoid when better markers exist (these can match
+  // a company "About us" section that comes before nav chrome).
+  const tier3 = [
+    "about (?:the )?company",
+    "about us",
+    "overview",
+    "description",
+  ];
+
+  for (const tier of [tier1, tier2, tier3]) {
+    let earliest = -1;
+    for (const phrase of tier) {
+      const re = wrap(phrase);
+      const m = content.match(re);
+      if (m && m.index !== undefined) {
+        if (earliest === -1 || m.index < earliest) earliest = m.index;
+      }
+    }
+    if (earliest !== -1) return earliest;
+  }
+  return -1;
+}
+
+// Truncate after the JD ends — when we hit a clear "footer-ish" section.
+function findContentEnd(content: string): number {
+  const stops = [
+    /(?:^|\n)\s*#*\s*(?:apply now|apply for this job|how to apply)\b/i,
+    /(?:^|\n)\s*#*\s*equal (?:employment|opportunity)\b/i,
+    /(?:^|\n)\s*#*\s*(?:our )?diversity (?:and inclusion|statement)\b/i,
+    /(?:^|\n)\s*#*\s*privacy (?:policy|notice)\b/i,
+    /(?:^|\n)\s*#*\s*cookie (?:policy|notice)\b/i,
+    /(?:^|\n)\s*#*\s*terms (?:of service|of use|and conditions)\b/i,
+    /(?:^|\n)\s*#*\s*(?:share this job|share this role)\b/i,
+    /(?:^|\n)\s*#*\s*follow us\b/i,
+    /(?:^|\n)\s*#*\s*subscribe\b/i,
+    /(?:^|\n)\s*#*\s*join our (?:talent )?community\b/i,
+  ];
   let earliest = -1;
-  for (const re of patterns) {
+  for (const re of stops) {
     const m = content.match(re);
     if (m && m.index !== undefined) {
       if (earliest === -1 || m.index < earliest) earliest = m.index;
@@ -306,7 +376,7 @@ function compose(title: string, company: string, body: string) {
     .replace(/\n[ \t]+/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim()
-    .slice(0, 1500);
+    .slice(0, 2500);
 }
 
 function extractCompanyFromTitle(title?: string) {
