@@ -6,31 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { store, useStore } from "@/lib/store";
 import { useToast } from "@/components/Toast";
 
-const interviewerLines = [
-  "Do you use Java?",
-  "Walk me through how you'd design a rate limiter for an API at scale.",
-  "Tell me about a time you had to push back on an executive's decision.",
-  "What's a technical challenge you're particularly proud of solving?",
-  "How do you handle disagreements with teammates on technical direction?",
-  "Where do you see yourself in 5 years?",
-];
-
-const aiAnswers = [
-  "Yes, I have experience with Java as part of my programming skills. While my main experience is with JavaScript frameworks like React.js, Angular.js, and Node.js, I have also worked with Java during my studies and projects. I understand Java's core concepts and object-oriented principles, and I am comfortable using it when needed.",
-  "**1. Token bucket per user.** Issue N tokens, refill at fixed rate. O(1) check on each request.\n\n**2. Distributed counters in Redis** with INCR + EXPIRE. Sharded by user_id hash to avoid hotspots.\n\n**3. Sliding window log** if we need precise fairness — trade memory for accuracy.",
-  "At Notion, our VP wanted to ship a v2 SDK before our largest customer renewed — 6 weeks, no migration plan. I ran a 3-day usage audit, showed 40% of API calls would break silently, and proposed a phased plan with a no-op fallback. We held the launch 4 weeks. Customer renewed.",
-  "I led the migration of our payment service from sync DB calls inside request handlers to a properly pooled async setup. Brought p99 latency from 2.4s down to 180ms during peak load. The hard part wasn't the refactor — it was building observability so we could trust the new system.",
-  "I default to writing things down. When two engineers disagree, the disagreement is usually about an unstated assumption or a missing constraint. A short doc with the tradeoffs surfaces those, and most of the time we converge without a meeting.",
-  "Honestly, I want to keep working on systems that have to actually scale under load — that's where I feel I learn fastest. Whether that's a tech-lead role or eventually founding something is less important than the problem.",
-];
-
 type Turn = { who: "you"; text: string; at: string };
-
-function fmtTimer(s: number) {
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-}
 
 function fmtClock(d = new Date()) {
   return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -38,6 +14,26 @@ function fmtClock(d = new Date()) {
 
 function minsLeft(seconds: number) {
   return Math.ceil(seconds / 60);
+}
+
+// Map our settings.language to a BCP-47 tag for Web Speech API
+function langTag(lang: string): string {
+  switch (lang) {
+    case "Spanish":
+      return "es-ES";
+    case "French":
+      return "fr-FR";
+    case "German":
+      return "de-DE";
+    case "Hindi":
+      return "hi-IN";
+    case "Mandarin":
+      return "zh-CN";
+    case "Japanese":
+      return "ja-JP";
+    default:
+      return "en-US";
+  }
 }
 
 export default function LiveSessionPage() {
@@ -50,97 +46,355 @@ export default function LiveSessionPage() {
   const [secondsLeft, setSecondsLeft] = useState(600);
   const [transcript, setTranscript] = useState<Turn[]>([]);
   const [manualInput, setManualInput] = useState("");
-  const [micConnected, setMicConnected] = useState(false);
+
+  // streams + recognition refs (mutable, don't trigger re-render)
+  const screenRef = useRef<MediaStream | null>(null);
+  const micRef = useRef<MediaStream | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const recognitionShouldRun = useRef(false);
+
+  const [live, setLive] = useState(false);
+  const [hasScreenAudio, setHasScreenAudio] = useState(false);
+  const [hasMic, setHasMic] = useState(false);
+
   const [aiQuestion, setAiQuestion] = useState<string | null>(null);
   const [aiAnswer, setAiAnswer] = useState<string>("");
   const [aiTyping, setAiTyping] = useState(false);
   const [aiAnsweredAt, setAiAnsweredAt] = useState<string | null>(null);
-  const transcriptRef = useRef<HTMLDivElement>(null);
-  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const micRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const ranOnce = useRef(false);
+  const [screenshot, setScreenshot] = useState<string | null>(null);
 
+  const transcriptRef = useRef<HTMLDivElement>(null);
+
+  /* ------------------- timer ------------------- */
   useEffect(() => {
     if (session) setSecondsLeft(session.free ? 600 : 3600);
   }, [session?.id, session?.free, session]);
 
-  // timer ticks down once mic is connected (= "session live")
   useEffect(() => {
-    if (!micConnected) return;
-    tickRef.current = setInterval(() => {
+    if (!live) return;
+    const t = setInterval(() => {
       setSecondsLeft((v) => {
         if (v <= 1) {
-          setMicConnected(false);
+          handleStop();
           if (id) store.endSession(id);
           return 0;
         }
         return v - 1;
       });
     }, 1000);
-    return () => {
-      if (tickRef.current) clearInterval(tickRef.current);
-    };
-  }, [micConnected, id]);
-
-  // mock mic-driven transcript: when connected, occasionally drop a "you spoke" line
-  useEffect(() => {
-    if (!micConnected) return;
-    const phrases = [
-      "Okay. So why I want to use the Java.",
-      "Java is the basic language.",
-      "Okay.",
-      "You use.",
-      "Hmm, let me think about that.",
-    ];
-    let idx = 0;
-    micRef.current = setInterval(() => {
-      const text = phrases[idx % phrases.length];
-      idx++;
-      setTranscript((t) => [...t, { who: "you", text, at: fmtClock() }]);
-    }, 9000);
-    return () => {
-      if (micRef.current) clearInterval(micRef.current);
-    };
-  }, [micConnected]);
-
-  // auto-answer mode: every 12s while mic connected, generate a question + answer
-  useEffect(() => {
-    if (!micConnected || !session?.autoGenerate) return;
-    const t = setInterval(() => generateAnswer(), 12000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [micConnected, session?.autoGenerate]);
+  }, [live, id]);
 
-  // keep transcript scrolled
+  /* ------------------- auto-scroll transcript ------------------- */
   useEffect(() => {
     if (transcriptRef.current) {
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
     }
   }, [transcript]);
 
-  function generateAnswer() {
-    const idx = Math.floor(Math.random() * interviewerLines.length);
-    const q = interviewerLines[idx];
-    const a = aiAnswers[idx];
-    setAiQuestion(q);
+  /* ------------------- cleanup on unmount ------------------- */
+  useEffect(() => {
+    return () => {
+      handleStop(true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ------------------- auto-answer mode ------------------- */
+  useEffect(() => {
+    if (!live || !session?.autoGenerate) return;
+    const t = setInterval(() => generateAnswer(), 12000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, session?.autoGenerate]);
+
+  /* ------------------- core: connect ------------------- */
+  async function handleConnect() {
+    if (live) return;
+    if (typeof window === "undefined" || !navigator.mediaDevices?.getDisplayMedia) {
+      toast.error({
+        title: "Browser not supported",
+        message: "Use Chrome or Edge to enable screen sharing.",
+      });
+      return;
+    }
+
+    let screenStream: MediaStream;
+    try {
+      screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true,
+      });
+    } catch (err) {
+      const e = err as DOMException;
+      if (e.name === "NotAllowedError") {
+        toast.error({
+          title: "Permission denied",
+          message: "Please grant screen sharing access to start the session.",
+        });
+      } else {
+        toast.error({
+          title: "Couldn't start screen share",
+          message: e.message || "Try again.",
+        });
+      }
+      return;
+    }
+
+    screenRef.current = screenStream;
+
+    // Pipe screen audio through speakers so user hears the interviewer
+    const audioTracks = screenStream.getAudioTracks();
+    if (audioTracks.length > 0 && audioElRef.current) {
+      audioElRef.current.srcObject = new MediaStream(audioTracks);
+      audioElRef.current.play().catch(() => {});
+      setHasScreenAudio(true);
+    } else {
+      setHasScreenAudio(false);
+      toast.info({
+        title: "No screen audio detected",
+        message: "Tip: tick \"Also share tab audio\" in the share dialog to capture the interviewer's voice.",
+      });
+    }
+
+    // Detect "Stop sharing" from browser bar
+    screenStream.getVideoTracks()[0]?.addEventListener("ended", () => {
+      handleStop();
+    });
+
+    // Try mic for the candidate's voice
+    try {
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micRef.current = mic;
+      setHasMic(true);
+    } catch {
+      setHasMic(false);
+    }
+
+    // Web Speech API for live transcription of the candidate
+    startSpeechRecognition();
+
+    setLive(true);
+    if (id) store.activateSession(id);
+
+    toast.success({
+      title: "You're live",
+      message: audioTracks.length
+        ? "Screen + tab audio + microphone connected."
+        : "Screen + microphone connected (tab audio not shared).",
+    });
+  }
+
+  function startSpeechRecognition() {
+    const SR =
+      (typeof window !== "undefined" &&
+        ((window as unknown as { SpeechRecognition?: typeof SpeechRecognition }).SpeechRecognition ||
+          (window as unknown as { webkitSpeechRecognition?: typeof SpeechRecognition }).webkitSpeechRecognition)) ||
+      null;
+
+    if (!SR) return;
+
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = false;
+    rec.lang = langTag(session?.language ?? "English");
+
+    rec.onresult = (event: SpeechRecognitionEvent) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          const text = event.results[i][0].transcript.trim();
+          if (text) {
+            setTranscript((t) => [
+              ...t,
+              { who: "you", text, at: fmtClock() },
+            ]);
+          }
+        }
+      }
+    };
+    rec.onerror = () => {
+      // Common: "no-speech" — ignore. We'll auto-restart on end.
+    };
+    rec.onend = () => {
+      if (recognitionShouldRun.current) {
+        try {
+          rec.start();
+        } catch {
+          // already running
+        }
+      }
+    };
+
+    recognitionShouldRun.current = true;
+    try {
+      rec.start();
+    } catch {
+      // already started
+    }
+    recognitionRef.current = rec;
+  }
+
+  function handleStop(unmounting = false) {
+    recognitionShouldRun.current = false;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        /* noop */
+      }
+      recognitionRef.current = null;
+    }
+    screenRef.current?.getTracks().forEach((t) => t.stop());
+    micRef.current?.getTracks().forEach((t) => t.stop());
+    if (audioElRef.current) audioElRef.current.srcObject = null;
+    screenRef.current = null;
+    micRef.current = null;
+    setLive(false);
+    setHasScreenAudio(false);
+    setHasMic(false);
+    if (!unmounting && id) {
+      // session metadata stays "active" until Exit
+    }
+  }
+
+  /* ------------------- AI answer (real streaming OpenAI call) ------------------- */
+  const abortRef = useRef<AbortController | null>(null);
+
+  async function generateAnswer(question?: string, screenshotDataUrl?: string) {
+    if (!session) return;
+
+    // Cancel any in-flight stream
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    setAiQuestion(question || (transcript.length > 0 ? transcript[transcript.length - 1].text : "Inferring from transcript…"));
     setAiAnswer("");
     setAiTyping(true);
     setAiAnsweredAt(null);
-    let i = 0;
-    const tick = setInterval(() => {
-      i += 6;
-      setAiAnswer(a.slice(0, i));
-      if (i >= a.length) {
-        clearInterval(tick);
+
+    try {
+      const res = await fetch("/api/ai-answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question,
+          transcript: transcript.map((t) => t.text),
+          screenshotDataUrl,
+          session: {
+            title: session.title,
+            description: session.description,
+            mode: session.mode,
+            language: session.language,
+            simpleLanguage: session.simpleLanguage,
+            extraContext: session.extraContext,
+            aiModel: session.aiModel,
+            resumeName: session.resumeName,
+          },
+        }),
+        signal: ac.signal,
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.error({
+          title: "AI couldn't respond",
+          message: data?.error || `Status ${res.status}`,
+        });
         setAiTyping(false);
-        setAiAnsweredAt(fmtClock());
-        if (id) {
-          // bump usage cheaply by re-using endSession's counter? Skip for now.
+        return;
+      }
+      if (!res.body) {
+        setAiTyping(false);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let acc = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE — split on lines. Each event line begins with "data: " and ends in \n\n
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const raw of lines) {
+          const line = raw.trim();
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === "[DONE]") continue;
+          try {
+            const parsed = JSON.parse(payload);
+            const delta = parsed?.choices?.[0]?.delta?.content;
+            if (typeof delta === "string" && delta.length > 0) {
+              acc += delta;
+              setAiAnswer(acc);
+            }
+          } catch {
+            // partial chunk — wait for next
+          }
         }
       }
-    }, 18);
+
+      setAiTyping(false);
+      setAiAnsweredAt(fmtClock());
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return;
+      toast.error({
+        title: "Couldn't reach AI",
+        message: err instanceof Error ? err.message : "Network error.",
+      });
+      setAiTyping(false);
+    }
   }
 
+  /* ------------------- screenshot ------------------- */
+  async function handleScreenshot() {
+    if (!screenRef.current) {
+      toast.error({
+        title: "Not connected",
+        message: "Click Connect to share your screen first.",
+      });
+      return;
+    }
+    try {
+      const video = document.createElement("video");
+      video.srcObject = screenRef.current;
+      video.muted = true;
+      await new Promise<void>((resolve, reject) => {
+        video.onloadedmetadata = () => resolve();
+        setTimeout(() => reject(new Error("timeout")), 4000);
+      });
+      await video.play();
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth || 1920;
+      canvas.height = video.videoHeight || 1080;
+      canvas.getContext("2d")?.drawImage(video, 0, 0);
+      const url = canvas.toDataURL("image/png");
+      setScreenshot(url);
+      toast.success({
+        title: "Screenshot captured",
+        message: `${canvas.width}×${canvas.height} sent to AI.`,
+      });
+      generateAnswer(undefined, url);
+      video.pause();
+      video.srcObject = null;
+    } catch (e) {
+      toast.error({
+        title: "Couldn't capture",
+        message: e instanceof Error ? e.message : "Try again.",
+      });
+    }
+  }
+
+  /* ------------------- chat handlers ------------------- */
   function handleSendManual() {
     const text = manualInput.trim();
     if (!text) return;
@@ -156,31 +410,20 @@ export default function LiveSessionPage() {
     setAiQuestion(null);
     setAiAnswer("");
     setAiAnsweredAt(null);
-  }
-
-  function handleConnect() {
-    if (!session || !id) return;
-    setMicConnected(true);
-    if (session.status !== "active" && !ranOnce.current) {
-      store.activateSession(id);
-      ranOnce.current = true;
-    }
-    toast.success({ title: "Microphone connected", message: "We'll listen and transcribe what you say." });
+    setScreenshot(null);
   }
 
   function handleExit() {
+    handleStop(true);
     if (id) store.endSession(id, transcript.length);
     router.push("/dashboard/sessions");
   }
 
-  function handleScreenshot() {
-    toast.info({
-      title: "Screenshot captured",
-      message: "We'll detect any coding question on the screen and send it to the AI.",
-    });
-    generateAnswer();
+  function handleResetTimer() {
+    if (session) setSecondsLeft(session.free ? 600 : 3600);
   }
 
+  /* ------------------- render ------------------- */
   if (!session) {
     return (
       <div className="grid h-full place-items-center text-[14px] text-neutral-500">
@@ -199,16 +442,25 @@ export default function LiveSessionPage() {
 
   return (
     <div className="flex h-full flex-col bg-neutral-50">
+      {/* hidden audio element to play screen-shared audio through user's speakers */}
+      <audio ref={audioElRef} autoPlay playsInline />
+
       {/* Top bar */}
       <header className="grid h-14 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-neutral-200 bg-white px-4">
         <div className="flex items-center gap-2">
-          <button className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2.5 py-1.5 text-[12.5px] font-medium text-neutral-700 transition hover:bg-neutral-50">
+          <button
+            onClick={() => document.documentElement.requestFullscreen?.()}
+            className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2.5 py-1.5 text-[12.5px] font-medium text-neutral-700 transition hover:bg-neutral-50"
+          >
             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 9V5a2 2 0 0 1 2-2h4M21 9V5a2 2 0 0 0-2-2h-4M3 15v4a2 2 0 0 0 2 2h4M21 15v4a2 2 0 0 1-2 2h-4" />
             </svg>
             Fullscreen
           </button>
-          <button className="rounded-md border border-neutral-200 bg-white px-2.5 py-1.5 text-[12.5px] font-medium text-neutral-700 transition hover:bg-neutral-50">
+          <button
+            onClick={handleConnect}
+            className="rounded-md border border-neutral-200 bg-white px-2.5 py-1.5 text-[12.5px] font-medium text-neutral-700 transition hover:bg-neutral-50"
+          >
             Change Tab
           </button>
         </div>
@@ -217,21 +469,29 @@ export default function LiveSessionPage() {
           <span className="text-[14px] font-bold tracking-tight text-neutral-950">InterviewAI</span>
         </Link>
         <div className="flex items-center justify-end gap-2">
+          {live && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-bold text-rose-600 ring-1 ring-rose-200">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400/70" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-rose-500" />
+              </span>
+              LIVE
+            </span>
+          )}
           <div className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2.5 py-1.5 text-[12.5px]">
             <span className="text-rose-500">⏰</span>
             <span className="font-semibold text-neutral-900">{minsLeft(secondsLeft)} mins</span>
             {session.free && <span className="text-neutral-500">(Free)</span>}
           </div>
           <button
-            onClick={() => setSecondsLeft(session.free ? 600 : 3600)}
-            className="inline-flex items-center gap-1 rounded-md border border-neutral-200 bg-white px-2 py-1.5 text-neutral-600 transition hover:bg-neutral-50 hover:text-neutral-900"
+            onClick={handleResetTimer}
+            className="grid h-7 w-7 place-items-center rounded-md border border-neutral-200 bg-white text-neutral-600 transition hover:bg-neutral-50 hover:text-neutral-900"
             title="Reset timer"
           >
             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
               <path d="M21 3v5h-5" />
             </svg>
-            <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor"><path d="M5 8l5 5 5-5z" /></svg>
           </button>
           <button
             onClick={handleExit}
@@ -243,15 +503,15 @@ export default function LiveSessionPage() {
       </header>
 
       <main className="grid flex-1 grid-cols-1 gap-4 overflow-hidden p-4 lg:grid-cols-2">
-        {/* LEFT: Transcript + Mic + Manual + Bottom CTAs */}
+        {/* LEFT: Transcript */}
         <section className="flex min-h-0 flex-col rounded-2xl border border-neutral-200 bg-white">
           {/* Top control row */}
-          <div className="relative flex items-center gap-2 border-b border-neutral-100 px-4 py-3">
-            {!micConnected ? (
+          <div className="flex flex-wrap items-center gap-2 border-b border-neutral-100 px-4 py-3">
+            {!live ? (
               <button
                 onClick={handleConnect}
                 className="group inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-[13px] font-semibold text-neutral-900 transition hover:bg-neutral-50"
-                title="Connect your microphone to include what you are saying in the AI response to provide more context."
+                title="Connect microphone + screen to capture interviewer audio"
               >
                 Connect
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -261,7 +521,7 @@ export default function LiveSessionPage() {
               </button>
             ) : (
               <button
-                onClick={() => setMicConnected(false)}
+                onClick={() => handleStop()}
                 className="inline-flex items-center gap-2 rounded-lg bg-rose-500 px-3 py-1.5 text-[13px] font-semibold text-white transition hover:bg-rose-600"
               >
                 <span className="relative flex h-2 w-2">
@@ -280,6 +540,16 @@ export default function LiveSessionPage() {
               </svg>
               Clear
             </button>
+            {live && (
+              <div className="flex items-center gap-1.5 text-[11px] text-neutral-500">
+                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ${hasScreenAudio ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-amber-200"}`}>
+                  🔊 {hasScreenAudio ? "Tab audio" : "No tab audio"}
+                </span>
+                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ${hasMic ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-neutral-100 text-neutral-600 ring-neutral-200"}`}>
+                  🎙 {hasMic ? "Mic" : "No mic"}
+                </span>
+              </div>
+            )}
             <div className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-[13px] text-neutral-700">
               <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
@@ -289,14 +559,28 @@ export default function LiveSessionPage() {
             </div>
           </div>
 
-          {/* Transcript chat */}
+          {/* Transcript */}
           <div ref={transcriptRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
             {transcript.length === 0 && (
-              <p className="py-12 text-center text-[13px] text-neutral-400">
-                {micConnected
-                  ? "Listening… speak or type a manual message below."
-                  : 'Click "Connect" to enable the microphone, or type below.'}
-              </p>
+              <div className="grid h-full place-items-center px-6 text-center">
+                <div>
+                  <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-neutral-100 text-2xl">
+                    🎙
+                  </div>
+                  {live ? (
+                    <p className="text-[13px] text-neutral-500">
+                      Listening… speak or type a manual message below.
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-[14px] font-semibold text-neutral-900">Ready to start</p>
+                      <p className="mt-1 max-w-xs text-[12.5px] text-neutral-500">
+                        Click <span className="font-semibold">Connect</span> to share your screen and microphone. Make sure to tick &quot;Also share tab audio&quot;.
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
             )}
             {transcript.map((t, i) => (
               <div key={i} className="flex flex-col items-end gap-1">
@@ -333,7 +617,7 @@ export default function LiveSessionPage() {
             <div className="relative">
               <div aria-hidden className="cta-glow-ring absolute inset-0 rounded-xl" />
               <button
-                onClick={generateAnswer}
+                onClick={() => generateAnswer()}
                 disabled={aiTyping}
                 className="relative flex w-full items-center justify-center gap-2 rounded-xl bg-neutral-950 py-3 text-[14px] font-semibold text-white transition hover:bg-neutral-800 disabled:bg-neutral-700"
               >
@@ -354,10 +638,9 @@ export default function LiveSessionPage() {
           </div>
         </section>
 
-        {/* RIGHT: AI Question + Answer */}
+        {/* RIGHT: AI */}
         <section className="relative flex min-h-0 flex-col rounded-2xl border border-neutral-200 bg-white">
-          {/* Floating Clear Messages */}
-          {(aiQuestion || aiAnswer) && (
+          {(aiQuestion || aiAnswer || screenshot) && (
             <button
               onClick={handleClearAi}
               className="absolute right-4 top-4 z-10 inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-[12.5px] font-medium text-neutral-600 shadow-sm transition hover:bg-neutral-50 hover:text-neutral-900"
@@ -370,24 +653,29 @@ export default function LiveSessionPage() {
           )}
 
           <div className="flex-1 overflow-y-auto px-7 py-6">
-            {!aiQuestion && !aiAnswer && (
+            {!aiQuestion && !aiAnswer && !screenshot && (
               <div className="grid h-full place-items-center text-center">
                 <div>
-                  <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-neutral-100 text-2xl">
-                    💬
-                  </div>
+                  <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-neutral-100 text-2xl">💬</div>
                   <p className="text-[14px] font-semibold text-neutral-900">No messages yet.</p>
                   <p className="mt-1 text-[13px] text-neutral-500">
                     Click <span className="font-semibold">&quot;Answer&quot;</span> or{" "}
-                    <span className="font-semibold">&quot;AI Answer&quot;</span> to start!
+                    <span className="font-semibold">&quot;Screenshot&quot;</span> to start!
                   </p>
                 </div>
               </div>
             )}
 
+            {screenshot && (
+              <div className="mb-5 overflow-hidden rounded-lg border border-neutral-200">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={screenshot} alt="Screenshot" className="block w-full" />
+              </div>
+            )}
+
             {aiQuestion && (
               <div className="mb-5">
-                <div className="flex items-center gap-2 text-[14px] text-neutral-900">
+                <div className="flex items-baseline gap-2 text-[14px] text-neutral-900">
                   <span aria-hidden>💬</span>
                   <span className="font-bold">Question:</span>
                   <span className="text-neutral-700">{aiQuestion}</span>
@@ -412,17 +700,15 @@ export default function LiveSessionPage() {
             )}
           </div>
 
-          {/* Manual input on right (mirror) */}
           <div className="flex items-center gap-2 border-t border-neutral-100 px-4 py-3">
             <input
-              placeholder="Type a manual message..."
+              placeholder="Ask the AI a custom question..."
               className="flex-1 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13.5px] placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   const v = (e.target as HTMLInputElement).value.trim();
                   if (v) {
-                    setAiQuestion(v);
-                    generateAnswer();
+                    generateAnswer(v);
                     (e.target as HTMLInputElement).value = "";
                   }
                 }
