@@ -57,6 +57,11 @@ export default function LiveSessionPage() {
   const [live, setLive] = useState(false);
   const [hasScreenAudio, setHasScreenAudio] = useState(false);
   const [hasMic, setHasMic] = useState(false);
+  const [interim, setInterim] = useState<string>("");
+  const [audioLevel, setAudioLevel] = useState(0);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   const [aiQuestion, setAiQuestion] = useState<string | null>(null);
   const [aiAnswer, setAiAnswer] = useState<string>("");
@@ -166,11 +171,53 @@ export default function LiveSessionPage() {
 
     // Try mic for the candidate's voice
     try {
-      const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mic = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
       micRef.current = mic;
       setHasMic(true);
-    } catch {
+      // wire AudioContext-based level meter
+      try {
+        const Ctor =
+          (window.AudioContext ||
+            (window as unknown as { webkitAudioContext?: typeof AudioContext })
+              .webkitAudioContext) as typeof AudioContext;
+        const ctx = new Ctor();
+        audioCtxRef.current = ctx;
+        const source = ctx.createMediaStreamSource(mic);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        analyserRef.current = analyser;
+        const buffer = new Uint8Array(analyser.frequencyBinCount);
+        const tick = () => {
+          if (!analyserRef.current) return;
+          analyserRef.current.getByteTimeDomainData(buffer);
+          let sum = 0;
+          for (let i = 0; i < buffer.length; i++) {
+            const v = (buffer[i] - 128) / 128;
+            sum += v * v;
+          }
+          const rms = Math.sqrt(sum / buffer.length);
+          setAudioLevel(Math.min(1, rms * 4));
+          rafRef.current = requestAnimationFrame(tick);
+        };
+        tick();
+      } catch {
+        // visualization is best-effort
+      }
+    } catch (err) {
+      const e = err as DOMException;
       setHasMic(false);
+      toast.error({
+        title: "Microphone access denied",
+        message:
+          e.name === "NotAllowedError"
+            ? "Click the lock icon in the address bar → allow Microphone."
+            : e.name === "NotFoundError"
+              ? "No microphone detected. Plug one in or check OS settings."
+              : e.message || "Couldn't access the microphone.",
+      });
     }
 
     // Web Speech API for live transcription of the candidate
@@ -194,35 +241,76 @@ export default function LiveSessionPage() {
           (window as unknown as { webkitSpeechRecognition?: typeof SpeechRecognition }).webkitSpeechRecognition)) ||
       null;
 
-    if (!SR) return;
+    if (!SR) {
+      toast.error({
+        title: "Speech recognition not supported",
+        message:
+          "Your browser doesn't support live transcription. Use Chrome, Edge, or Safari for the best experience.",
+      });
+      return;
+    }
 
     const rec = new SR();
     rec.continuous = true;
-    rec.interimResults = false;
+    rec.interimResults = true;
     rec.lang = langTag(session?.language ?? "English");
 
     rec.onresult = (event: SpeechRecognitionEvent) => {
+      let interimText = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          const text = event.results[i][0].transcript.trim();
-          if (text) {
-            setTranscript((t) => [
-              ...t,
-              { who: "you", text, at: fmtClock() },
-            ]);
-          }
+        const result = event.results[i];
+        const text = result[0].transcript.trim();
+        if (!text) continue;
+        if (result.isFinal) {
+          setInterim("");
+          setTranscript((t) => [...t, { who: "you", text, at: fmtClock() }]);
+        } else {
+          interimText += text + " ";
         }
       }
+      if (interimText) setInterim(interimText.trim());
     };
-    rec.onerror = () => {
-      // Common: "no-speech" — ignore. We'll auto-restart on end.
+
+    rec.onerror = (event: SpeechRecognitionErrorEvent) => {
+      const code = event.error;
+      // benign — keep silent
+      if (code === "no-speech" || code === "aborted") return;
+
+      const map: Record<string, { title: string; message: string }> = {
+        "not-allowed": {
+          title: "Microphone permission denied",
+          message: "Click the lock icon → Allow microphone, then click Connect again.",
+        },
+        "service-not-allowed": {
+          title: "Speech service blocked",
+          message: "Your browser or OS is blocking speech recognition. Try Chrome.",
+        },
+        "audio-capture": {
+          title: "No microphone detected",
+          message: "Plug in a microphone or check your OS audio settings.",
+        },
+        network: {
+          title: "Network error",
+          message: "Speech recognition needs an internet connection.",
+        },
+        "language-not-supported": {
+          title: "Language not supported",
+          message: `Your browser doesn't support ${session?.language ?? "this language"}. Defaulting to English.`,
+        },
+      };
+      const err = map[code] || {
+        title: "Speech recognition error",
+        message: `Error: ${code}. Try Stop + Connect again.`,
+      };
+      toast.error(err);
     };
+
     rec.onend = () => {
       if (recognitionShouldRun.current) {
         try {
           rec.start();
         } catch {
-          // already running
+          // ignored — will retry next tick
         }
       }
     };
@@ -230,8 +318,12 @@ export default function LiveSessionPage() {
     recognitionShouldRun.current = true;
     try {
       rec.start();
-    } catch {
-      // already started
+    } catch (e) {
+      const err = e as Error;
+      // Most common: InvalidStateError (already started)
+      if (!err.message.includes("started")) {
+        toast.error({ title: "Couldn't start mic", message: err.message });
+      }
     }
     recognitionRef.current = rec;
   }
@@ -246,6 +338,15 @@ export default function LiveSessionPage() {
       }
       recognitionRef.current = null;
     }
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current = null;
+    }
+    analyserRef.current = null;
     screenRef.current?.getTracks().forEach((t) => t.stop());
     micRef.current?.getTracks().forEach((t) => t.stop());
     if (audioElRef.current) audioElRef.current.srcObject = null;
@@ -254,6 +355,8 @@ export default function LiveSessionPage() {
     setLive(false);
     setHasScreenAudio(false);
     setHasMic(false);
+    setInterim("");
+    setAudioLevel(0);
     if (!unmounting && id) {
       // session metadata stays "active" until Exit
     }
@@ -545,8 +648,16 @@ export default function LiveSessionPage() {
                 <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ${hasScreenAudio ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-amber-200"}`}>
                   🔊 {hasScreenAudio ? "Tab audio" : "No tab audio"}
                 </span>
-                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ${hasMic ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-neutral-100 text-neutral-600 ring-neutral-200"}`}>
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 ring-1 ${hasMic ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-rose-50 text-rose-700 ring-rose-200"}`}>
                   🎙 {hasMic ? "Mic" : "No mic"}
+                  {hasMic && (
+                    <span className="relative ml-0.5 inline-block h-2 w-10 overflow-hidden rounded-full bg-emerald-100">
+                      <span
+                        className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-[width] duration-75"
+                        style={{ width: `${Math.min(100, Math.max(4, audioLevel * 100))}%` }}
+                      />
+                    </span>
+                  )}
                 </span>
               </div>
             )}
@@ -590,6 +701,14 @@ export default function LiveSessionPage() {
                 <div className="text-[11px] text-neutral-500">You · {t.at}</div>
               </div>
             ))}
+            {interim && (
+              <div className="flex flex-col items-end gap-1 opacity-60">
+                <div className="max-w-[85%] rounded-2xl rounded-br-sm border border-dashed border-neutral-300 bg-neutral-50 px-4 py-2.5 text-[14px] italic text-neutral-700">
+                  {interim}
+                </div>
+                <div className="text-[11px] text-neutral-400">You · listening…</div>
+              </div>
+            )}
           </div>
 
           {/* Manual input */}
