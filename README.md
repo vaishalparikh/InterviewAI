@@ -1,6 +1,6 @@
 # InterviewAI
 
-A real-time AI interview copilot — a fully working clone of [ParakeetAI](https://www.parakeet-ai.com), built end-to-end with Next.js 15, React 19, and Tailwind CSS.
+A real-time AI interview copilot built end-to-end with Next.js 15, React 19, and Tailwind CSS.
 
 Marketing landing, sign-in, dashboard, sessions list, multi-step session creation, live coaching screen, resume + documents uploads, and a complete upgrade/billing flow with promo codes — all wired together with `localStorage`-backed state so the entire app works without a backend.
 
@@ -159,10 +159,10 @@ Reactive across the whole app via `useSyncExternalStore` — even cross-tab via 
 - No real payment processing. The checkout modal is a UI prototype — entered card data is discarded.
 - Auth is `localStorage`-only. Sign-out clears the user; sessions, resumes, and invoices remain so they're visible after re-signing in.
 - File uploads store metadata only (name, size, upload date). File contents are not retained.
-- This is a UI clone for educational purposes. Refer to ParakeetAI's actual product and terms for any production use.
+- This is a UI prototype for educational purposes — UI/UX patterns only, no production-ready logic.
 
 ---
 
 ## License
 
-Educational / personal use. Not affiliated with ParakeetAI.
+Educational / personal use.
