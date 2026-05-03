@@ -1,23 +1,13 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useSession } from "next-auth/react";
 import AppSidebar from "@/components/app/AppSidebar";
-import { useStore } from "@/lib/store";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
-  const user = useStore((s) => s.user);
+  const { status } = useSession();
 
-  useEffect(() => {
-    // run on client; user may briefly be null during SSR snapshot, then re-checked after hydration
-    const t = setTimeout(() => {
-      if (!user) router.replace("/signin");
-    }, 0);
-    return () => clearTimeout(t);
-  }, [user, router]);
-
-  if (!user) {
+  // middleware redirects unauth'd, but during initial fetch show splash
+  if (status === "loading") {
     return (
       <div className="grid h-screen place-items-center bg-white">
         <div className="flex flex-col items-center gap-3">

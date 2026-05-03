@@ -2,7 +2,8 @@
 
 import { useSyncExternalStore } from "react";
 
-export type User = { email: string; name: string };
+// Note: User identity is owned by Auth.js (next-auth). Use `useSession()` for that.
+// This store only persists app data (sessions, resumes, documents, plan, invoices).
 
 export type Resume = {
   id: string;
@@ -63,7 +64,6 @@ export type Invoice = {
 };
 
 export type AppState = {
-  user: User | null;
   sessions: Session[];
   resumes: Resume[];
   documents: Doc[];
@@ -80,7 +80,6 @@ export const FREE_PLAN: Plan = {
 };
 
 const initialState: AppState = {
-  user: null,
   sessions: [],
   resumes: [],
   documents: [],
@@ -95,7 +94,6 @@ function loadFromStorage(): AppState {
     if (!raw) return initialState;
     const parsed = JSON.parse(raw);
     return {
-      user: parsed.user ?? null,
       sessions: parsed.sessions ?? [],
       resumes: parsed.resumes ?? [],
       documents: parsed.documents ?? [],
@@ -154,17 +152,6 @@ function fmtDate(d = new Date()) {
 }
 
 export const store = {
-  signIn(email: string) {
-    const trimmed = email.trim().toLowerCase();
-    const name = trimmed.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) || "User";
-    state = { ...state, user: { email: trimmed, name } };
-    emit();
-  },
-  signOut() {
-    state = { ...state, user: null };
-    emit();
-  },
-
   /* --- billing --- */
   purchasePlan(input: {
     type: "credits" | "subscription" | "lifetime";

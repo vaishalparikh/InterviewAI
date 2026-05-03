@@ -91,12 +91,44 @@ src/
 git clone https://github.com/vaishalparikh/InterviewAI.git
 cd InterviewAI
 bun install
+cp .env.local.example .env.local   # then fill in the values (see Auth setup below)
 bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
 `npm`, `pnpm`, and `yarn` also work — `bun.lock` is committed but the project has no Bun-specific dependencies.
+
+### Auth setup (Google OAuth via Auth.js)
+
+The app uses [Auth.js v5](https://authjs.dev) with the Google provider. Setup is one-time, ~5 minutes, and free.
+
+1. **Generate `AUTH_SECRET`**
+
+   ```bash
+   openssl rand -base64 33
+   # or
+   npx auth secret
+   ```
+
+2. **Create Google OAuth credentials** at [console.cloud.google.com](https://console.cloud.google.com)
+   - APIs & Services → Credentials → Create credentials → OAuth client ID
+   - Application type: **Web application**
+   - Authorized redirect URI: `http://localhost:3000/api/auth/callback/google`
+   - (For production, also add `https://your-domain.com/api/auth/callback/google`)
+   - Copy the **Client ID** and **Client secret**
+
+3. **Fill in `.env.local`**
+
+   ```env
+   AUTH_SECRET=<paste from step 1>
+   AUTH_GOOGLE_ID=<paste from step 2>
+   AUTH_GOOGLE_SECRET=<paste from step 2>
+   ```
+
+4. **Restart the dev server** — `bun dev`. Sign in via Google now works at `/signin`.
+
+That's it. Sign-in is fully real — protected routes redirect through `src/middleware.ts`, sessions are JWTs (no DB needed), and the user's name/email/avatar surface in the sidebar via `useSession()`.
 
 ---
 

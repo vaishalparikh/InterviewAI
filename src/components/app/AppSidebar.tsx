@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { signOut, useSession } from "next-auth/react";
 import { useState } from "react";
-import { store, useStore } from "@/lib/store";
+import { useStore } from "@/lib/store";
 
 function PlanCard() {
   const plan = useStore((s) => s.plan);
@@ -105,8 +106,8 @@ const navBottom = [
 
 export default function AppSidebar() {
   const pathname = usePathname();
-  const router = useRouter();
-  const user = useStore((s) => s.user);
+  const { data: session } = useSession();
+  const user = session?.user;
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -114,9 +115,8 @@ export default function AppSidebar() {
     href === "/app" ? pathname === "/app" : pathname.startsWith(href);
 
   function handleSignOut() {
-    store.signOut();
     setMenuOpen(false);
-    router.replace("/signin");
+    signOut({ callbackUrl: "/" });
   }
 
   return (
@@ -227,9 +227,14 @@ export default function AppSidebar() {
             onClick={() => setMenuOpen((v) => !v)}
             className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-neutral-500 transition hover:bg-neutral-50 hover:text-neutral-900"
           >
-            <span className="grid h-6 w-6 place-items-center rounded-full bg-neutral-950 text-[10px] font-bold text-white">
-              {user?.name?.[0] ?? "U"}
-            </span>
+            {user?.image ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={user.image} alt="" className="h-6 w-6 rounded-full" />
+            ) : (
+              <span className="grid h-6 w-6 place-items-center rounded-full bg-neutral-950 text-[10px] font-bold text-white">
+                {user?.name?.[0] ?? "U"}
+              </span>
+            )}
             <span className="flex-1 truncate text-left">{user?.email ?? "—"}</span>
             <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="currentColor">
               <path d="M5 8l5 5 5-5z" />

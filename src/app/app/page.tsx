@@ -3,9 +3,9 @@
 import { Fragment, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import AppTopBar from "@/components/app/AppTopBar";
 import CreateSessionModal from "@/components/app/CreateSessionModal";
-import { useStore } from "@/lib/store";
 
 const sources = [
   { name: "Google", icon: "🔍" },
@@ -61,7 +61,8 @@ const titleFor = (eyebrow: string) =>
 
 export default function HomePage() {
   const router = useRouter();
-  const user = useStore((s) => s.user);
+  const { data: session } = useSession();
+  const user = session?.user;
   const [createOpen, setCreateOpen] = useState(false);
   const [free, setFree] = useState(true);
 
