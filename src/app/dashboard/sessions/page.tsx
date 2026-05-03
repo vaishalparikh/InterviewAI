@@ -5,6 +5,7 @@ import Link from "next/link";
 import AppTopBar from "@/components/app/AppTopBar";
 import CreateSessionModal from "@/components/app/CreateSessionModal";
 import ChoosePlatformModal from "@/components/app/ChoosePlatformModal";
+import ConnectModal from "@/components/app/ConnectModal";
 import { store, useStore } from "@/lib/store";
 
 export default function SessionsPage() {
@@ -12,6 +13,7 @@ export default function SessionsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [free, setFree] = useState(true);
   const [platformFor, setPlatformFor] = useState<string | null>(null);
+  const [connectFor, setConnectFor] = useState<string | null>(null);
 
   return (
     <>
@@ -148,6 +150,20 @@ export default function SessionsPage() {
         open={!!platformFor}
         sessionId={platformFor ?? undefined}
         onClose={() => setPlatformFor(null)}
+        onContinue={(id) => {
+          setPlatformFor(null);
+          setConnectFor(id);
+        }}
+      />
+      <ConnectModal
+        open={!!connectFor}
+        sessionId={connectFor ?? undefined}
+        onClose={() => setConnectFor(null)}
+        onBack={() => {
+          const id = connectFor;
+          setConnectFor(null);
+          setPlatformFor(id);
+        }}
       />
     </>
   );

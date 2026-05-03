@@ -1,20 +1,18 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-
 type Props = {
   open: boolean;
   sessionId?: string;
   onClose: () => void;
+  onContinue?: (sessionId: string) => void;
 };
 
-export default function ChoosePlatformModal({ open, sessionId, onClose }: Props) {
-  const router = useRouter();
+export default function ChoosePlatformModal({ open, sessionId, onClose, onContinue }: Props) {
   if (!open) return null;
 
-  function openInBrowser() {
-    onClose();
-    if (sessionId) router.push(`/dashboard/sessions/${sessionId}`);
+  function pick() {
+    if (sessionId && onContinue) onContinue(sessionId);
+    else onClose();
   }
 
   return (
@@ -37,7 +35,7 @@ export default function ChoosePlatformModal({ open, sessionId, onClose }: Props)
 
         <div className="relative mt-6">
           <button
-            onClick={openInBrowser}
+            onClick={pick}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-neutral-950 py-3.5 text-[14px] font-semibold text-white transition hover:bg-neutral-800"
           >
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -59,7 +57,7 @@ export default function ChoosePlatformModal({ open, sessionId, onClose }: Props)
         <div className="mt-5 flex items-center justify-center gap-2 text-[13px] text-neutral-500">
           or
           <button
-            onClick={openInBrowser}
+            onClick={pick}
             className="inline-flex items-center gap-1.5 text-neutral-900 underline-offset-2 hover:underline"
           >
             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
