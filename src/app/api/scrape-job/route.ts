@@ -5,6 +5,12 @@ export const runtime = "nodejs";
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 
+type ScrapeResult = {
+  company?: string;
+  description?: string;
+  title?: string;
+};
+
 export async function POST(req: Request) {
   let body: { url?: string };
   try {
@@ -25,55 +31,62 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "That doesn't look like a valid URL." }, { status: 400 });
   }
 
-  // Network fetch with timeout
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), 10_000);
+  // 1) Try direct fetch + HTML parse — fast, works on SSR pages
+  const direct = await tryDirect(parsed.href).catch(() => null);
 
+  // 2) If direct didn't return enough, fall back to Jina AI Reader (free, runs headless browser)
+  const isThin = !direct || !direct.description || direct.description.trim().length < 80;
+  let result: ScrapeResult | null = direct;
+
+  if (isThin) {
+    const jina = await tryJina(parsed.href).catch(() => null);
+    if (jina) {
+      result = {
+        // prefer Jina's longer description; fall back to direct values
+        company: direct?.company || jina.company,
+        title: jina.title || direct?.title,
+        description: jina.description || direct?.description,
+      };
+    }
+  }
+
+  if (!result || (!result.company && !result.description)) {
+    return NextResponse.json({
+      ok: false,
+      error:
+        "We couldn't read this page. Please paste the company and description manually.",
+    });
+  }
+
+  return NextResponse.json({ ok: true, ...result });
+}
+
+/* ----------------------- direct HTML fetch ----------------------- */
+
+async function tryDirect(url: string): Promise<ScrapeResult | null> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 10_000);
   try {
-    const res = await fetch(parsed.href, {
+    const res = await fetch(url, {
       headers: {
         "User-Agent": UA,
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
       },
       redirect: "follow",
-      signal: controller.signal,
+      signal: ctrl.signal,
     });
-
-    if (!res.ok) {
-      return NextResponse.json({
-        ok: false,
-        error: `Page returned HTTP ${res.status}. Try pasting the company + description manually.`,
-      });
-    }
-
+    if (!res.ok) return null;
     const html = await res.text();
-    const data = extract(html, parsed);
-
-    // If we got nothing useful, signal to user
-    if (!data.company && !data.description) {
-      return NextResponse.json({
-        ok: false,
-        error:
-          "We couldn't read this page (it may require JavaScript). Please enter the details manually.",
-      });
-    }
-
-    return NextResponse.json({ ok: true, ...data });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({
-      ok: false,
-      error: msg.includes("aborted")
-        ? "The page took too long to respond."
-        : "Couldn't reach that page. Please check the URL.",
-    });
+    return extractFromHtml(html, new URL(url));
+  } catch {
+    return null;
   } finally {
     clearTimeout(t);
   }
 }
 
-function extract(html: string, url: URL) {
+function extractFromHtml(html: string, url: URL): ScrapeResult {
   const meta = (key: string) => {
     const patterns = [
       new RegExp(`<meta[^>]+property=["']${key}["'][^>]+content=["']([^"']+)["']`, "i"),
@@ -87,35 +100,26 @@ function extract(html: string, url: URL) {
     return undefined;
   };
 
-  const titleTag = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1];
-  const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
+  const titleTag = decodeEntities(html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? "");
   const ogTitle = meta("og:title");
   const ogDesc = meta("og:description");
   const ogSite = meta("og:site_name");
   const metaDesc = meta("description");
 
-  // Company heuristic — prefer og:site_name, then derived from hostname
-  let company =
+  const company =
     ogSite ||
     extractCompanyFromTitle(titleTag) ||
     capitalize(url.hostname.replace(/^www\./, "").split(".")[0]);
 
-  // Title heuristic — strip company suffix when present
-  const title = (ogTitle || titleTag || stripTags(h1) || "").trim();
-  const cleanTitle = title.replace(new RegExp(`\\s*[-|·–]\\s*${escapeRe(company)}.*$`, "i"), "").trim();
+  const title = (ogTitle || titleTag).trim();
+  const cleanTitle = title
+    .replace(new RegExp(`\\s*[-|·–]\\s*${escapeRe(company)}.*$`, "i"), "")
+    .trim();
 
-  // Description: prefer og:description, fallback to meta description, fallback to body text snippet
   const bodySnippet = decodeEntities(stripBody(html)).slice(0, 2400);
   const rawDescription = ogDesc || metaDesc || bodySnippet;
 
-  // Stitch a useful description
-  const description = [cleanTitle && cleanTitle !== company ? `Role: ${cleanTitle}` : null, rawDescription]
-    .filter(Boolean)
-    .join("\n\n")
-    .replace(/\s+/g, " ")
-    .replace(/\n /g, "\n")
-    .trim()
-    .slice(0, 1500);
+  const description = compose(cleanTitle, company, rawDescription);
 
   return {
     title: cleanTitle || undefined,
@@ -124,20 +128,97 @@ function extract(html: string, url: URL) {
   };
 }
 
+/* ----------------------- Jina AI Reader fallback ----------------------- */
+// https://r.jina.ai converts any URL to clean LLM-friendly text. Free without API key.
+
+async function tryJina(url: string): Promise<ScrapeResult | null> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 25_000);
+  try {
+    const res = await fetch(`https://r.jina.ai/${url}`, {
+      headers: {
+        Accept: "text/plain",
+        "User-Agent": UA,
+      },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const md = await res.text();
+    return extractFromMarkdown(md, new URL(url));
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function extractFromMarkdown(md: string, url: URL): ScrapeResult {
+  // Jina's response format:
+  //   Title: <page title>
+  //   URL Source: <url>
+  //   Markdown Content:
+  //   <actual content>
+  const titleMatch = md.match(/^Title:\s*(.+)$/m);
+  const contentStart = md.indexOf("Markdown Content:");
+  const content =
+    contentStart >= 0 ? md.slice(contentStart + "Markdown Content:".length) : md;
+
+  const headerTitle = titleMatch?.[1]?.trim();
+
+  // Strip markdown formatting for description
+  const plain = content
+    .replace(/!\[.*?\]\(.*?\)/g, " ") // images
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // links → label only
+    .replace(/`{1,3}[^`]*`{1,3}/g, " ") // code
+    .replace(/^#+\s*/gm, "") // heading markers
+    .replace(/^[*\-+]\s+/gm, "• ") // bullet markers
+    .replace(/\*\*([^*]+)\*\*/g, "$1") // bold
+    .replace(/\*([^*]+)\*/g, "$1") // italic
+    .replace(/^\s*\|.*\|\s*$/gm, "") // table rows (rough)
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+
+  // Try to detect company from title pattern: "Role at Company"
+  const company =
+    extractCompanyFromTitle(headerTitle) ||
+    capitalize(url.hostname.replace(/^www\./, "").split(".")[0]);
+
+  // Pull a clean role title — prefer the page <title> structure
+  const cleanTitle = (headerTitle ?? "")
+    .replace(new RegExp(`\\s*[-|·–]\\s*${escapeRe(company)}.*$`, "i"), "")
+    .trim();
+
+  // Take the first ~1500 chars of meaningful content
+  const description = compose(cleanTitle, company, plain.slice(0, 2400));
+
+  return {
+    title: cleanTitle || undefined,
+    company: company?.slice(0, 80) || undefined,
+    description: description || undefined,
+  };
+}
+
+/* ----------------------- helpers ----------------------- */
+
+function compose(title: string, company: string, body: string) {
+  const lines = [
+    title && title.toLowerCase() !== company.toLowerCase() ? `Role: ${title}` : null,
+    body,
+  ].filter(Boolean);
+  return lines
+    .join("\n\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, 1500);
+}
+
 function extractCompanyFromTitle(title?: string) {
   if (!title) return undefined;
-  // "Senior Engineer at Acme · LinkedIn"  →  "Acme"
-  // "Senior Engineer - Acme | Greenhouse" →  "Acme"
   const at = title.match(/\bat\s+([A-Z][A-Za-z0-9& .]+?)(?:\s*[-|·•–]|\s*$)/);
   if (at) return at[1].trim();
   return undefined;
-}
-
-function stripTags(s?: string) {
-  return s
-    ?.replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function stripBody(html: string) {
