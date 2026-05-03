@@ -160,13 +160,19 @@ function extractFromMarkdown(md: string, url: URL): ScrapeResult {
   //   <actual content>
   const titleMatch = md.match(/^Title:\s*(.+)$/m);
   const contentStart = md.indexOf("Markdown Content:");
-  const content =
+  let content =
     contentStart >= 0 ? md.slice(contentStart + "Markdown Content:".length) : md;
 
   const headerTitle = titleMatch?.[1]?.trim();
 
-  // Strip markdown formatting for description
-  const plain = content
+  // 1) Skip past site navigation — find a "real content" landmark
+  const landmark = findContentLandmark(content);
+  if (landmark > 0) {
+    content = content.slice(landmark);
+  }
+
+  // 2) Strip markdown formatting
+  let plain = content
     .replace(/!\[.*?\]\(.*?\)/g, " ") // images
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // links → label only
     .replace(/`{1,3}[^`]*`{1,3}/g, " ") // code
@@ -174,28 +180,117 @@ function extractFromMarkdown(md: string, url: URL): ScrapeResult {
     .replace(/^[*\-+]\s+/gm, "• ") // bullet markers
     .replace(/\*\*([^*]+)\*\*/g, "$1") // bold
     .replace(/\*([^*]+)\*/g, "$1") // italic
-    .replace(/^\s*\|.*\|\s*$/gm, "") // table rows (rough)
-    .replace(/\n{2,}/g, "\n")
+    .replace(/^\s*\|.*\|\s*$/gm, ""); // table rows
+
+  // 3) De-duplicate consecutive identical lines (Jina often repeats title 3-4×)
+  plain = dedupeLines(plain);
+
+  // 4) Drop nav-like lines (very short, single-word, list of links)
+  plain = dropNavNoise(plain);
+
+  // 5) Final whitespace normalization
+  plain = plain
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  // Try to detect company from title pattern: "Role at Company"
+  // Company detection
   const company =
     extractCompanyFromTitle(headerTitle) ||
     capitalize(url.hostname.replace(/^www\./, "").split(".")[0]);
 
-  // Pull a clean role title — prefer the page <title> structure
+  // Clean role title (strip company suffix)
   const cleanTitle = (headerTitle ?? "")
     .replace(new RegExp(`\\s*[-|·–]\\s*${escapeRe(company)}.*$`, "i"), "")
     .trim();
 
-  // Take the first ~1500 chars of meaningful content
-  const description = compose(cleanTitle, company, plain.slice(0, 2400));
+  const description = compose(cleanTitle, company, plain.slice(0, 1800));
 
   return {
     title: cleanTitle || undefined,
     company: company?.slice(0, 80) || undefined,
     description: description || undefined,
   };
+}
+
+// Find where the actual job content starts on a page — common headings
+function findContentLandmark(content: string): number {
+  const patterns: RegExp[] = [
+    /(?:^|\n)\s*#*\s*job description\b/i,
+    /(?:^|\n)\s*#*\s*about (?:the|this) (?:team|role|position|job|company)\b/i,
+    /(?:^|\n)\s*#*\s*role description\b/i,
+    /(?:^|\n)\s*#*\s*the role\b/i,
+    /(?:^|\n)\s*#*\s*role overview\b/i,
+    /(?:^|\n)\s*#*\s*position summary\b/i,
+    /(?:^|\n)\s*#*\s*job summary\b/i,
+    /(?:^|\n)\s*#*\s*key responsibilities\b/i,
+    /(?:^|\n)\s*#*\s*what (?:you|we)['']?(?:ll| will)? do\b/i,
+    /(?:^|\n)\s*#*\s*what you['']?(?:ll| will)? be doing\b/i,
+    /(?:^|\n)\s*#*\s*responsibilities\b/i,
+    /(?:^|\n)\s*#*\s*overview\b/i,
+    /(?:^|\n)\s*#*\s*about us\b/i,
+  ];
+
+  let earliest = -1;
+  for (const re of patterns) {
+    const m = content.match(re);
+    if (m && m.index !== undefined) {
+      if (earliest === -1 || m.index < earliest) earliest = m.index;
+    }
+  }
+  return earliest;
+}
+
+// Collapse runs of identical lines (case-insensitive)
+function dedupeLines(s: string): string {
+  const lines = s.split("\n");
+  const out: string[] = [];
+  let prev = "";
+  for (const line of lines) {
+    const k = line.trim().toLowerCase();
+    if (k && k === prev) continue;
+    out.push(line);
+    if (k) prev = k;
+  }
+  return out.join("\n");
+}
+
+// Drop lines that look like navigation chrome — short bullets, single words, empty headings
+function dropNavNoise(s: string): string {
+  const lines = s.split("\n");
+  const out: string[] = [];
+  let consecutiveShortBullets = 0;
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) {
+      out.push("");
+      consecutiveShortBullets = 0;
+      continue;
+    }
+
+    const isShortBullet = /^•\s+/.test(line) && line.length < 30;
+    if (isShortBullet) {
+      consecutiveShortBullets++;
+      // Drop runs of short bullets (typical nav lists)
+      if (consecutiveShortBullets >= 2) continue;
+    } else {
+      consecutiveShortBullets = 0;
+    }
+
+    // Drop very short standalone lines that are typical of menus
+    if (line.length < 15 && !/[.?!:]$/.test(line) && /^[A-Z]/.test(line)) {
+      // Probably a menu label like "Jobs", "Companies", "Services"
+      // Only drop if surrounded by similar-looking lines (likely navigation block)
+      const prev = out[out.length - 1]?.trim() ?? "";
+      const isPrevAlsoShort = prev && prev.length < 25;
+      if (isPrevAlsoShort) continue;
+    }
+
+    out.push(raw);
+  }
+  return out.join("\n");
 }
 
 /* ----------------------- helpers ----------------------- */
