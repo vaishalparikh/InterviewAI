@@ -52,6 +52,29 @@ body {
 .animate-marquee-y { animation: marquee-y 60s linear infinite; }
 .animate-marquee-y-rev { animation: marquee-y 70s linear infinite reverse; }
 
+/* Toast animations */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(40%) scale(0.95); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes toast-leave {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(20%); }
+}
+@keyframes toast-bar {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+.animate-toast-in {
+  animation: toast-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.animate-toast-leave {
+  animation: toast-leave 220ms ease-in forwards;
+}
+.animate-toast-bar {
+  animation: toast-bar 4s linear forwards;
+}
+
 /* Live dot pulse + waveform — used inside LiveCoachingPreview */
 @keyframes iv-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
