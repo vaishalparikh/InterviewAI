@@ -107,6 +107,7 @@ function extractFromHtml(html: string, url: URL): ScrapeResult {
   const metaDesc = meta("description");
 
   const company =
+    detectCompanyFromAtsUrl(url) ||
     ogSite ||
     extractCompanyFromTitle(titleTag) ||
     capitalize(url.hostname.replace(/^www\./, "").split(".")[0]);
@@ -203,6 +204,7 @@ function extractFromMarkdown(md: string, url: URL): ScrapeResult {
 
   // Company detection
   const company =
+    detectCompanyFromAtsUrl(url) ||
     extractCompanyFromTitle(headerTitle) ||
     capitalize(url.hostname.replace(/^www\./, "").split(".")[0]);
 
@@ -391,8 +393,9 @@ function reformatJD(text: string): string {
   // 2) Paragraph break before known JD section headings when joined into prose.
   //    Sorted longest-first so "Key job responsibilities" splits before
   //    a shorter phrase ever has a chance to match its inner words.
-  //    Bare ambiguous words ("Responsibilities", "Qualifications", "Description")
-  //    are intentionally excluded — they collide with longer phrases.
+  //    Bare ambiguous words ("Responsibilities", "Qualifications", "Description",
+  //    "The role") are intentionally excluded — they collide with longer phrases
+  //    or appear mid-sentence in normal prose.
   const sections = [
     "Key job responsibilities",
     "Duties and responsibilities",
@@ -430,11 +433,7 @@ function reformatJD(text: string): string {
     "Nice to have",
     "Your impact",
     "Your mission",
-    "Compensation",
-    "Benefits",
-    "Why join",
     "About us",
-    "The role",
   ];
 
   for (const phrase of sections) {
@@ -450,10 +449,20 @@ function reformatJD(text: string): string {
     text = text.replace(re, (_full, head) => `\n\n${head}\n`);
   }
 
-  // 3) Split inline bullets — Jina sometimes glues `- Item1- Item2- Item3`.
+  // 3) Generic TitleCase heading detection — for company-specific custom headings
+  //    not in our list, e.g. "Shift Operations Management", "Team Leadership",
+  //    "Process Excellence", "Cross-functional Coordination" on Flipkart-style pages.
+  //    Pattern: 2+ consecutive TitleCase words ending in a lowercase letter,
+  //    immediately followed by an Uppercase+lowercase boundary (joined heading→body).
+  text = text.replace(
+    /([A-Z][a-z]+(?:[-'][a-zA-Z]+)*(?:\s+[A-Z][a-z]+(?:[-'][a-zA-Z]+)*){1,4})([A-Z][a-z])/g,
+    "$1\n$2",
+  );
+
+  // 4) Split inline bullets — Jina sometimes glues `- Item1- Item2- Item3`.
   text = text.replace(/([^\n\-])\s*-\s+([A-Z])/g, "$1\n- $2");
 
-  // 4) Whitespace normalization
+  // 5) Whitespace normalization
   text = text
     .replace(/[ \t]+/g, " ")
     .replace(/\n[ \t]+/g, "\n")
@@ -469,6 +478,62 @@ function cleanCompany(c?: string): string | undefined {
   return c
     .replace(/\.(jobs|careers|com|io|net|org|co|app|ai)$/i, "")
     .replace(/\s+(?:home page|jobs home|careers|jobs)\s*$/i, "")
+    .trim();
+}
+
+// Many job pages are hosted on ATS platforms (Greenhouse, Lever, TurboHire, Workable…)
+// where og:site_name returns the ATS name instead of the actual employer.
+// Detect employer from the URL structure when possible.
+function detectCompanyFromAtsUrl(url: URL): string | undefined {
+  const host = url.hostname.toLowerCase();
+  const seg = url.pathname.split("/").filter(Boolean);
+
+  // Path-based ATS: /<company>/jobs/... or /<company>/<id>
+  if (
+    host === "boards.greenhouse.io" ||
+    host === "jobs.lever.co" ||
+    host === "jobs.ashbyhq.com" ||
+    host === "jobs.workable.com" ||
+    host === "apply.workable.com" ||
+    host === "jobs.smartrecruiters.com" ||
+    host === "careers.smartrecruiters.com"
+  ) {
+    const candidate = seg[0];
+    if (candidate && /^[a-z0-9-]+$/i.test(candidate)) {
+      return prettifySlug(candidate);
+    }
+  }
+
+  // Subdomain-based ATS: <company>.<ats>.<tld>
+  const subdomainMatchers: RegExp[] = [
+    /^([a-z0-9-]+)\.turbohire\.co$/i,
+    /^([a-z0-9-]+)\.myworkdayjobs\.com$/i,
+    /^([a-z0-9-]+)\.workable\.com$/i,
+    /^([a-z0-9-]+)\.recruitee\.com$/i,
+    /^([a-z0-9-]+)\.breezy\.hr$/i,
+    /^([a-z0-9-]+)\.applytojob\.com$/i,
+    /^([a-z0-9-]+)\.bamboohr\.com$/i,
+    /^([a-z0-9-]+)\.zohorecruit\.com$/i,
+    /^([a-z0-9-]+)\.jobvite\.com$/i,
+    /^([a-z0-9-]+)\.icims\.com$/i,
+  ];
+  for (const re of subdomainMatchers) {
+    const m = host.match(re);
+    if (m && m[1]) {
+      const sub = m[1];
+      if (!["www", "jobs", "careers", "boards", "apply", "rec"].includes(sub)) {
+        return prettifySlug(sub);
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function prettifySlug(slug: string): string {
+  return slug
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
     .trim();
 }
 
