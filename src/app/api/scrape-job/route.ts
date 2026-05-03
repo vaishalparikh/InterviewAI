@@ -123,7 +123,7 @@ function extractFromHtml(html: string, url: URL): ScrapeResult {
 
   return {
     title: cleanTitle || undefined,
-    company: company?.slice(0, 80) || undefined,
+    company: cleanCompany(company)?.slice(0, 80) || undefined,
     description: description || undefined,
   };
 }
@@ -215,7 +215,7 @@ function extractFromMarkdown(md: string, url: URL): ScrapeResult {
 
   return {
     title: cleanTitle || undefined,
-    company: company?.slice(0, 80) || undefined,
+    company: cleanCompany(company)?.slice(0, 80) || undefined,
     description: description || undefined,
   };
 }
@@ -366,9 +366,10 @@ function dropNavNoise(s: string): string {
 /* ----------------------- helpers ----------------------- */
 
 function compose(title: string, company: string, body: string) {
+  const reformatted = reformatJD(body);
   const lines = [
     title && title.toLowerCase() !== company.toLowerCase() ? `Role: ${title}` : null,
-    body,
+    reformatted,
   ].filter(Boolean);
   return lines
     .join("\n\n")
@@ -377,6 +378,98 @@ function compose(title: string, company: string, body: string) {
     .replace(/\n{3,}/g, "\n\n")
     .trim()
     .slice(0, 2500);
+}
+
+// Many extracted pages (esp. Amazon.jobs via Jina) return JD as one big paragraph
+// with no newlines before section headings or bullets. Re-introduce structure.
+function reformatJD(text: string): string {
+  // 1) Sentence break — lowercase letter immediately followed by Capital letter
+  //    after a period (no space). Avoids splitting on abbreviations like "U.S."
+  //    because we require lowercase before the period.
+  text = text.replace(/([a-z])\.([A-Z])/g, "$1.\n\n$2");
+
+  // 2) Paragraph break before known JD section headings when joined into prose.
+  //    Sorted longest-first so "Key job responsibilities" splits before
+  //    a shorter phrase ever has a chance to match its inner words.
+  //    Bare ambiguous words ("Responsibilities", "Qualifications", "Description")
+  //    are intentionally excluded — they collide with longer phrases.
+  const sections = [
+    "Key job responsibilities",
+    "Duties and responsibilities",
+    "Responsibilities and qualifications",
+    "What you['']?ll be doing",
+    "What you will be doing",
+    "What you['']?d be doing",
+    "What we['']?re looking for",
+    "Preferred qualifications",
+    "Required qualifications",
+    "Minimum qualifications",
+    "Position description",
+    "Position overview",
+    "Position summary",
+    "Primary responsibilities",
+    "Main responsibilities",
+    "Your responsibilities",
+    "Key responsibilities",
+    "Basic qualifications",
+    "About the position",
+    "About the company",
+    "About this role",
+    "About the team",
+    "About the role",
+    "About the job",
+    "Role description",
+    "Role overview",
+    "Job description",
+    "Job overview",
+    "Job summary",
+    "Job purpose",
+    "What you['']?ll do",
+    "What you will do",
+    "The opportunity",
+    "Nice to have",
+    "Your impact",
+    "Your mission",
+    "Compensation",
+    "Benefits",
+    "Why join",
+    "About us",
+    "The role",
+  ];
+
+  for (const phrase of sections) {
+    // Lookbehind: previous char must be lowercase letter, digit, or sentence punctuation.
+    //   This prevents matching the inner "Responsibilities" inside "Key job
+    //   Responsibilities" because the char before would be space, not a word/punct.
+    // Lookahead: next char must be whitespace, capital letter, or end of string.
+    //   Catches "About the teamShipTech" (capital S after "team").
+    const re = new RegExp(
+      `(?<=[a-z0-9\\.\\)!\\?])\\s+(${phrase})(?=\\s|[A-Z]|$)`,
+      "gi",
+    );
+    text = text.replace(re, (_full, head) => `\n\n${head}\n`);
+  }
+
+  // 3) Split inline bullets — Jina sometimes glues `- Item1- Item2- Item3`.
+  text = text.replace(/([^\n\-])\s*-\s+([A-Z])/g, "$1\n- $2");
+
+  // 4) Whitespace normalization
+  text = text
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return text;
+}
+
+// Strip common domain/junk suffixes from auto-detected company name
+function cleanCompany(c?: string): string | undefined {
+  if (!c) return c;
+  return c
+    .replace(/\.(jobs|careers|com|io|net|org|co|app|ai)$/i, "")
+    .replace(/\s+(?:home page|jobs home|careers|jobs)\s*$/i, "")
+    .trim();
 }
 
 function extractCompanyFromTitle(title?: string) {
