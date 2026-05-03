@@ -9,6 +9,7 @@ type Draft = {
   type: "interview" | "regular";
   jobUrl: string;
   company: string;
+  callTitle: string; // for regular calls
   description: string;
   resumeName: string;
   documentIds: string[];
@@ -23,6 +24,7 @@ const initialDraft = (resumeName: string): Draft => ({
   type: "interview",
   jobUrl: "",
   company: "",
+  callTitle: "",
   description: "",
   resumeName,
   documentIds: [],
@@ -61,12 +63,16 @@ export default function CreateSessionModal({ open, free = true, onClose, onCreat
   const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
   function handleCreate() {
+    const isInterview = draft.type === "interview";
     const session = store.createSession({
-      title: draft.company.trim() || "Untitled",
-      description: draft.description.trim() || (draft.type === "interview" ? "Interview" : "Call"),
+      title:
+        (isInterview ? draft.company : draft.callTitle).trim() ||
+        (isInterview ? "Untitled" : "Regular Call"),
+      description:
+        draft.description.trim() || (isInterview ? "Interview" : "Call"),
       mode: draft.type,
-      jobUrl: draft.jobUrl || undefined,
-      resumeName: draft.resumeName || undefined,
+      jobUrl: isInterview ? draft.jobUrl || undefined : undefined,
+      resumeName: isInterview ? draft.resumeName || undefined : undefined,
       documentIds: draft.documentIds,
       language: draft.language,
       simpleLanguage: draft.simpleLanguage,
@@ -79,7 +85,10 @@ export default function CreateSessionModal({ open, free = true, onClose, onCreat
     onClose();
   }
 
-  const formValid = draft.company.trim().length > 0 && draft.description.trim().length > 0;
+  // Interview requires company + description; Regular Call is fully optional
+  const formValid =
+    draft.type === "regular" ||
+    (draft.company.trim().length > 0 && draft.description.trim().length > 0);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -244,59 +253,91 @@ function FormStep({
           </div>
         </div>
 
-        <div>
-          <FieldLabel>Job Post URL <span className="text-[12px] font-normal text-neutral-500">(Optional)</span></FieldLabel>
-          <input
-            value={draft.jobUrl}
-            onChange={(e) => update({ jobUrl: e.target.value })}
-            placeholder="https://company.com/jobs/123"
-            className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13.5px] placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
-          />
-        </div>
-
-        <div className="text-center text-[12px] text-neutral-400">— or input manually —</div>
-
-        <div>
-          <FieldLabel>💼 Company *</FieldLabel>
-          <input
-            value={draft.company}
-            onChange={(e) => update({ company: e.target.value })}
-            placeholder="Microsoft..."
-            className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13.5px] placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
-          />
-        </div>
-
-        <div>
-          <FieldLabel>📄 Job Description *</FieldLabel>
-          <textarea
-            value={draft.description}
-            onChange={(e) => update({ description: e.target.value })}
-            placeholder="Software Engineer versed in Python, SQL, and AWS..."
-            rows={3}
-            className="w-full resize-none rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13.5px] placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
-          />
-        </div>
-
-        <div>
-          <FieldLabel>📎 Resume</FieldLabel>
-          {resumes.length > 0 ? (
-            <select
-              value={draft.resumeName}
-              onChange={(e) => update({ resumeName: e.target.value })}
-              className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13.5px] focus:border-neutral-400 focus:outline-none"
-            >
-              <option value="">— No resume —</option>
-              {resumes.map((r: any) => (
-                <option key={r.id} value={r.name}>{r.name}</option>
-              ))}
-            </select>
-          ) : (
-            <div className="flex items-center justify-between rounded-lg border border-dashed border-neutral-300 bg-neutral-50/60 px-3 py-2 text-[12.5px] text-neutral-500">
-              <span>No resume uploaded</span>
-              <a href="/dashboard/resumes" className="font-semibold text-neutral-900 underline-offset-2 hover:underline">Upload</a>
+        {draft.type === "interview" ? (
+          <>
+            <div>
+              <FieldLabel>Job Post URL <span className="text-[12px] font-normal text-neutral-500">(Optional)</span></FieldLabel>
+              <input
+                value={draft.jobUrl}
+                onChange={(e) => update({ jobUrl: e.target.value })}
+                placeholder="https://company.com/jobs/123"
+                className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13.5px] placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
+              />
             </div>
-          )}
-        </div>
+
+            <div className="text-center text-[12px] text-neutral-400">— or input manually —</div>
+
+            <div>
+              <FieldLabel>💼 Company *</FieldLabel>
+              <input
+                value={draft.company}
+                onChange={(e) => update({ company: e.target.value })}
+                placeholder="Microsoft..."
+                className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13.5px] placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <FieldLabel>📄 Job Description *</FieldLabel>
+              <textarea
+                value={draft.description}
+                onChange={(e) => update({ description: e.target.value })}
+                placeholder="Software Engineer versed in Python, SQL, and AWS..."
+                rows={3}
+                className="w-full resize-none rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13.5px] placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <FieldLabel>📎 Resume</FieldLabel>
+              {resumes.length > 0 ? (
+                <select
+                  value={draft.resumeName}
+                  onChange={(e) => update({ resumeName: e.target.value })}
+                  className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13.5px] focus:border-neutral-400 focus:outline-none"
+                >
+                  <option value="">— No resume —</option>
+                  {resumes.map((r: any) => (
+                    <option key={r.id} value={r.name}>{r.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <div className="flex items-center justify-between rounded-lg border border-dashed border-neutral-300 bg-neutral-50/60 px-3 py-2 text-[12.5px] text-neutral-500">
+                  <span>No resume uploaded</span>
+                  <a href="/dashboard/resumes" className="font-semibold text-neutral-900 underline-offset-2 hover:underline">Upload</a>
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Regular Call mode */}
+            <div>
+              <FieldLabel>📝 Call Title <span className="text-[12px] font-normal text-neutral-500">(Optional)</span></FieldLabel>
+              <input
+                value={draft.callTitle}
+                onChange={(e) => update({ callTitle: e.target.value })}
+                placeholder="Feature request discussion..."
+                className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13.5px] placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <FieldLabel>📄 Description <span className="text-[12px] font-normal text-neutral-500">(Optional)</span></FieldLabel>
+              <textarea
+                value={draft.description}
+                onChange={(e) => update({ description: e.target.value })}
+                placeholder="Discussing Q4 targets and partnership opportunities..."
+                rows={4}
+                className="w-full resize-none rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13.5px] placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
+              />
+            </div>
+
+            <p className="text-[12.5px] leading-relaxed text-neutral-500">
+              💡 Regular calls are for everyday meetings — sales calls, customer support, internal discussions. The AI will help you take notes and suggest responses without using interview-specific frameworks.
+            </p>
+          </>
+        )}
       </div>
       <ModalFooter onClose={onClose} onNext={onNext} nextDisabled={!valid} />
     </>
@@ -517,7 +558,11 @@ function ReadyStep({
           </p>
         )}
         <div className="rounded-lg border border-neutral-200 bg-neutral-50/60 p-3 text-[12.5px]">
-          <div className="font-semibold text-neutral-900">{draft.company || "Untitled"}</div>
+          <div className="font-semibold text-neutral-900">
+            {draft.type === "interview"
+              ? draft.company || "Untitled"
+              : draft.callTitle || "Regular Call"}
+          </div>
           <div className="mt-0.5 truncate text-neutral-600">{draft.description || "—"}</div>
           <div className="mt-2 flex flex-wrap gap-1.5">
             <span className="rounded-md bg-white px-2 py-0.5 text-[11px] font-medium text-neutral-700 ring-1 ring-neutral-200">
